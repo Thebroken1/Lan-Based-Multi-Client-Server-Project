@@ -102,9 +102,8 @@ void chat(SOCKET clientSock) {
 
 	}
 
-	char buffer[1024] = {};
+	char buffer[4056] = {};
 	char usernameBuffer[256] = {};
-	char checkBuffer[256] = {};
 	std::string username, messageBroadcasted;
 	int counter = 30000, byteReceived, inc = 0, usernameReceived, lowerCheck;
 

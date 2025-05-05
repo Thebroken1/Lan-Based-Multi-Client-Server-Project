@@ -6,9 +6,11 @@
 	#include <thread>
 	#include <vector>
 	#include <string>
+	#include <iphlpapi.h>	
 	#include <mutex>
 	#pragma comment(lib, "Ws2_32.lib")
-	
+	#pragma comment(lib, "iphlpapi.lib")
+
 	std::vector<std::string>messagesConstant;
 	std::mutex messagesConstantMutex;
 
@@ -42,8 +44,7 @@
 
 		server.sin_family = AF_INET;
 		server.sin_port = htons(1111);
-
-		const char* ip = "127.0.0.1";//rem to change this to designated ip
+		const char* ip = "10.112.40.47";//rem to change this to designated ip
 
 		if (inet_pton(AF_INET, ip, &server.sin_addr) <= 0) {
 
@@ -76,11 +77,14 @@
 		for (const auto& msg : messagesConstant) {
 			std::cout << msg << "\n";
 		}
+
+		std::cout << "Enter Message(type '/exit' to exit,'/help' for help): ";
+
 	}
 
 	void chat(SOCKET sock) {
 
-		std::string mes, user;
+		std::string mes, user,constmsg = "Enter Message(type '/exit' to exit,'/help' for help): " ;
 		char buffer[2048] = {};
 		const char* message;
 		const char* clientName = {};
@@ -93,9 +97,10 @@
 			return;
 		}
 		send(sock, clientName, static_cast<int>(strlen(clientName)), 0);
+		std::cout << constmsg;
 		while (true) {
+			                           
 
-			std::cout << "Enter Message(type '/exit' to exit,'/help' for help): ";
 			std::getline(std::cin, mes);
 			if (mes == "/exit") {
 				std::cout << "Closing";
