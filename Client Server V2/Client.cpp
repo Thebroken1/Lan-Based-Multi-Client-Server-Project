@@ -8,9 +8,11 @@
 	#include <string>
 	#include <iphlpapi.h>	
 	#include <mutex>
+	#include <atomic>
 	#pragma comment(lib, "Ws2_32.lib")
 	#pragma comment(lib, "iphlpapi.lib")
 
+std::atomic<bool> running(true);
 	std::vector<std::string>messagesConstant;
 	std::mutex messagesConstantMutex;
 
@@ -30,6 +32,49 @@
 		}
 
 	}
+	
+	std::string serverIPFinder() {
+		WSADATA wsa;
+		WSAStartup(MAKEWORD(2, 2), &wsa);
+		SOCKET udpSocket = socket(AF_INET, SOCK_DGRAM, 0);
+
+		if (udpSocket == INVALID_SOCKET) {
+
+			std::cout << "ERROR WITH SOCKET" << WSAGetLastError() << "\n";
+			return "";
+		}
+
+		sockaddr_in recieverAddress{};
+		recieverAddress.sin_family = AF_INET;
+		recieverAddress.sin_port = htons(1111);
+		recieverAddress.sin_addr.s_addr = INADDR_ANY;
+
+
+		if (bind(udpSocket, (sockaddr*)&recieverAddress, sizeof(recieverAddress)) < 0) {
+			std::cout << "ERROR" << WSAGetLastError();
+			closesocket(udpSocket);
+			return "";
+		}
+
+		char buffer[1024];
+		sockaddr_in senderAddr;
+		int senderLen = sizeof(senderAddr);
+
+		int bytesRecieved = recvfrom(udpSocket, buffer, sizeof(buffer) - 1, 0, (sockaddr*)&senderAddr, &senderLen);
+
+		if (bytesRecieved > 0) {
+			buffer[bytesRecieved] = '\0';
+			std::string msg(buffer);
+			if (msg.find("SERVER_IP_ADDRESS:") == 0) {
+				std::string serverIP = msg.substr(18);
+				closesocket(udpSocket);
+				return serverIP;
+			}
+		}
+
+		closesocket(udpSocket);
+		return "";
+	}
 
 	SOCKET clientConnection(sockaddr_in &server) {
 
@@ -42,11 +87,12 @@
 
 		}
 
+		std::string serverIP = serverIPFinder();
 		server.sin_family = AF_INET;
 		server.sin_port = htons(1111);
-		const char* ip = "10.112.40.47";//rem to change this to designated ip
+		const char* ip = "10.112.40.60";//rem to change this to designated ip
 
-		if (inet_pton(AF_INET, ip, &server.sin_addr) <= 0) {
+		if (inet_pton(AF_INET, serverIP.c_str(), &server.sin_addr) <= 0) {
 
 			std::cerr << "Invalid address or address not supported" << std::endl;
 			return 1;
@@ -60,7 +106,6 @@
 		COORD coordScreen = { 0, 0 };
 		SetConsoleCursorPosition(hConsole, coordScreen);
 	}
-
 
 	void redrawScreen() {
 		moveCursorToTop();
@@ -82,10 +127,10 @@
 
 	}
 
-	void chat(SOCKET sock) {
+	void chat(SOCKET sock,std::atomic<bool>& running) {
 
-		std::string mes, user,constmsg = "Enter Message(type '/exit' to exit,'/help' for help): " ;
-		char buffer[2048] = {};
+		std::string mes, user;
+		const std::string constmsg = "Enter Message(type '/exit' to exit,'/help' for help): ";
 		const char* message;
 		const char* clientName = {};
 
@@ -98,12 +143,14 @@
 		}
 		send(sock, clientName, static_cast<int>(strlen(clientName)), 0);
 		std::cout << constmsg;
-		while (true) {
+		while (running) {
 			                           
 
 			std::getline(std::cin, mes);
 			if (mes == "/exit") {
+				running = false;
 				std::cout << "Closing";
+				shutdown(sock, SD_BOTH);
 				closesocket(sock);
 				WSACleanup();
 				return;
@@ -114,17 +161,17 @@
 
 			{
 				std::lock_guard<std::mutex>lock(messagesConstantMutex);
-				messagesConstant.push_back(user+": "+mes.c_str());
+				messagesConstant.push_back(user+": "+mes);
 			}
 			redrawScreen();
 
 		}
 	}
 
-	void recieveMessages(SOCKET sock) {
+	void recieveMessages(SOCKET sock, std::atomic<bool>& running) {
 		char buffer[2048] = {};
 		int serverReply;
-		while(true){
+		while(running){
 			serverReply = recv(sock, buffer, sizeof(buffer) - 1, 0);
 			if (serverReply > 0) {
 
@@ -145,11 +192,7 @@
 		closesocket(sock);
 		WSACleanup();
 	}
-
-
-
 	
-
 	int main() {
 
 		WSADATA wsa;
@@ -158,12 +201,16 @@
 		clientStart(wsa);
 
 		sock = clientConnection(server);
-
+		std::atomic<bool> running(true);
 		if (connect(sock, (sockaddr*)&server, sizeof(server)) == SOCKET_ERROR) {
 			std::cerr << "Connection failed with error: " << WSAGetLastError() << std::endl;
 		}
-		std::thread messageReciever(recieveMessages, sock);
-		chat(sock);
+		std::thread messageReciever(recieveMessages, sock, std::ref(running));
+		std::thread chatThread(chat, sock, std::ref(running));
+		chatThread.join();
+		running = false;
+		messageReciever.join();
+		//chat(sock);
 	
 		cleanUp(sock);
 

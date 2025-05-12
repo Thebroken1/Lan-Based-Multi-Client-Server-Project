@@ -6,10 +6,12 @@
 #include <vector>
 #include <atomic>
 #include<mutex>
+#include <iphlpapi.h>
 #include <cctype>
 
 
 #pragma comment(lib, "Ws2_32.lib")
+#pragma comment(lib, "iphlpapi.lib")
 
 std::atomic<int> count = 0;
 std::vector<std::string>connectedUsers;
@@ -33,6 +35,34 @@ bool serverStart(WSADATA &wsa){
 
 }
 
+std::string IPv4Getter() {
+	char ipString[INET_ADDRSTRLEN] = {};
+	ULONG bufferSize = 15000;
+	IP_ADAPTER_ADDRESSES* addresses = (IP_ADAPTER_ADDRESSES*)malloc(bufferSize);
+
+	if (GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_PREFIX, NULL, addresses, &bufferSize) == ERROR_SUCCESS) {
+
+		for (IP_ADAPTER_ADDRESSES* adapter = addresses; adapter != NULL; adapter = adapter->Next) {
+			if (adapter -> OperStatus == IfOperStatusUp && adapter->IfType == IF_TYPE_IEEE80211) {
+				IP_ADAPTER_UNICAST_ADDRESS* unicast = adapter->FirstUnicastAddress;
+				while (unicast) {
+					if (unicast -> Address.lpSockaddr -> sa_family == AF_INET) {
+						sockaddr_in* sa_in = reinterpret_cast<sockaddr_in*>(unicast->Address.lpSockaddr);
+						inet_ntop(AF_INET, &(sa_in->sin_addr), ipString, INET_ADDRSTRLEN);
+						free(addresses);
+						return std::string(ipString);
+					}
+					unicast = unicast->Next;
+				}
+			}
+		}
+
+	}
+
+	free(addresses);
+	return "Unable to retrieve IP";
+}
+
 SOCKET connection(sockaddr_in& server) {
 
 	SOCKET serverSock = socket(AF_INET, SOCK_STREAM, 0);
@@ -43,19 +73,19 @@ SOCKET connection(sockaddr_in& server) {
 
 	}
 
+	std::string ip = IPv4Getter();
+
+
 	server.sin_family = AF_INET;
 	server.sin_port = htons(1111);
-	server.sin_addr.s_addr = INADDR_ANY;
+	//server.sin_addr.s_addr = ip; //changed to public ip
 
-	//const char* ip = INADDR_ANY; //rem to change this to designated ip
+	if (inet_pton(AF_INET, ip.c_str(), &(server.sin_addr)) <= 0) {
 
-	/*if (inet_pton(AF_INET, ip, &server.sin_addr) <= 0) {
-
-		std::cerr << "Invalid address or address not supported" << std::endl;
+		std::cerr << "Invalid";
 		return INVALID_SOCKET;
 
 	}
-	*/
 
 	if (bind(serverSock, (sockaddr*) &server, sizeof(server)) == SOCKET_ERROR) {
 
@@ -73,6 +103,41 @@ SOCKET connection(sockaddr_in& server) {
 
 	std::cout << "Server Started\n";
 	return serverSock;
+}
+
+void broadCastingServerIp() {
+	WSADATA wsa;
+	WSAStartup(MAKEWORD(2, 2), &wsa);
+	SOCKET udpSocket = socket(AF_INET, SOCK_DGRAM, 0);
+
+	if (udpSocket == INVALID_SOCKET) {
+		std::cout << "ERROR BROADCASTING" << WSAGetLastError() << "\n";
+		return;
+	}
+
+	BOOL broadcasting = true;
+
+	setsockopt(udpSocket ,SOL_SOCKET, SO_BROADCAST, (char*)&broadcasting, sizeof(broadcasting));
+
+	sockaddr_in broadcastAddress{};
+	broadcastAddress.sin_family = AF_INET;
+	broadcastAddress.sin_port = htons(1111);
+	broadcastAddress.sin_addr.s_addr = INADDR_BROADCAST;
+
+	std::string ip = IPv4Getter();
+	std::cout << "[Broadcast] Sending IP: " << ip << std::endl;
+
+	std::string mess = "SERVER_IP_ADDRESS:" + ip;
+
+	while (true) {
+
+		sendto(udpSocket, mess.c_str(), mess.length(), 0, (sockaddr*)&broadcastAddress, sizeof(broadcastAddress));
+
+		std::this_thread::sleep_for(std::chrono::seconds(3));
+	}
+
+	closesocket(udpSocket);
+
 }
 
 void userList(SOCKET clientSock) {
@@ -221,6 +286,9 @@ int main() {
 
 	c = sizeof(sockaddr_in);
 	serverSock = connection(server);
+
+	std::thread broadcastingThread(broadCastingServerIp);
+	broadcastingThread.detach();
 
 	while(true){
 	clientSock = accept(serverSock, (sockaddr*)&client, &c);
