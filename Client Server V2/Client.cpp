@@ -175,12 +175,22 @@ std::atomic<bool> running(true);
 			serverReply = recv(sock, buffer, sizeof(buffer) - 1, 0);
 			if (serverReply == SOCKET_ERROR) {
 				std::cout << "Server Down";
-				break;
+				running = false;
+				std::cout << "Closing";
+				shutdown(sock, SD_BOTH);
+				closesocket(sock);
+				WSACleanup();
+				return;
 			}
 
 			if (serverReply == 0) {
 				std::cout << "Server Disconnected";
-				break;
+				running = false;
+				std::cout << "Closing";
+				shutdown(sock, SD_BOTH);
+				closesocket(sock);
+				WSACleanup();
+				return;
 			}
 			if (serverReply > 0) {
 
