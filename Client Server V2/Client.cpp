@@ -174,9 +174,9 @@ std::atomic<bool> running(true);
 		while(running){
 			serverReply = recv(sock, buffer, sizeof(buffer) - 1, 0);
 			if (serverReply == SOCKET_ERROR) {
-				std::cout << "Server Down";
+				std::cout << "\nServer Down";
 				running = false;
-				std::cout << "Closing";
+				std::cout << "\nClosing";
 				shutdown(sock, SD_BOTH);
 				closesocket(sock);
 				WSACleanup();
